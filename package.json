@@ -22,7 +22,7 @@
     "package:all": "npm run build && electron-builder -mwl --config --publish never"
   },
   "dependencies": {
-    "@types/ssh2": "^1.15.5",
+    "@types/ssh2": "^1.15.6",
     "@xyflow/react": "^12.11",
     "dagre": "^0.8.5",
     "electron-log": "^5.4.4",
