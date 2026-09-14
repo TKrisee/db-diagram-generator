@@ -41,7 +41,7 @@
   "devDependencies": {
     "@types/dagre": "^0.7.52",
     "@types/node": "^25.9",
-    "@types/pg": "^8.21.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2",
     "@types/react-dom": "^19.3",
     "@vitejs/plugin-react": "^5.0",
