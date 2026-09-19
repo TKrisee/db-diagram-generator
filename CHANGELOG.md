@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/TKrisee/db-diagram-generator/compare/v1.7.0...v1.7.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* restore macOS signing with electron-builder 26.16.1 ([b578c04](https://github.com/TKrisee/db-diagram-generator/commit/b578c047af3babeb2f899ee638a53f32536c0160))
+
 ## [1.7.0](https://github.com/TKrisee/db-diagram-generator/compare/v1.6.1...v1.7.0) (2026-09-19)
 
 
