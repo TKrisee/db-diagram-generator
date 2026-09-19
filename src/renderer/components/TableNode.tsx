@@ -14,6 +14,7 @@ export type TableNodeData = {
     uqLabels: Map<string, string>;
     uqGroups: Map<string, string[]>;
     indexes: IndexMeta[];
+    queryFocus?: { label: string; columns: Set<string> };
 };
 
 export type TableNodeType = Node<TableNodeData, 'table'>;
@@ -21,13 +22,15 @@ export type TableNodeType = Node<TableNodeData, 'table'>;
 export default function TableNode({ data }: NodeProps<TableNodeType>) {
     return (
         <div className={`table-node ${data.isRoot ? 'root' : ''}`} style={{ width: data.width }}>
+            {data.queryFocus && <div className="query-stage-badge">{data.queryFocus.label}</div>}
             <div className="table-header">
                 {data.schema && <span className="schema">{data.schema}.</span>}
                 <span className="name">{data.name}</span>
             </div>
             <ul className="columns">
                 {data.columns.map((c) => (
-                    <li key={c.name} className="column">
+                    <li key={c.name} className={`column ${data.queryFocus?.columns.has(c.name) ? 'query-stage-column' : ''}`}
+                        data-column={c.name}>
                         <Handle
                             type="target"
                             position={Position.Left}

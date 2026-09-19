@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
     ReactFlow,
     ReactFlowProvider,
@@ -11,19 +12,28 @@ import {
     useReactFlow,
     getNodesBounds,
 } from '@xyflow/react';
-import type { Edge, NodeChange, NodePositionChange } from '@xyflow/react';
+import type { Edge, NodeChange, NodePositionChange, OnNodeDrag } from '@xyflow/react';
 import { toPng } from 'html-to-image';
 import type { DiagramPayload } from '@shared/schema';
+import type { QueryStage } from '@shared/query';
+import type { QueryStageFocus } from './queryPresentation';
 import TableNode, { type TableNodeType } from './TableNode';
 import CrowsFootEdge, { CrossingsCtx } from './CrowsFootEdge';
 import { buildGraph, tableKey } from './diagramLayout';
 import { computeCrossings, resolveCollisions, routeEdgesInGraph } from './edgeRouting';
-import type { CrossPoint } from './edgeRouting';
 
 const nodeTypes = { table: TableNode };
 const edgeTypes = { crowsfoot: CrowsFootEdge };
 
-type Props = { payload: DiagramPayload };
+type Props = {
+    payload: DiagramPayload;
+    controlsTarget?: HTMLDivElement | null;
+    queryKeys?: Set<string>;
+    onlyQueryTables?: boolean;
+    queryStage?: QueryStage;
+    stageFocus?: QueryStageFocus;
+    queryPlaying?: boolean;
+};
 
 export default function Diagram(props: Props) {
     return (
@@ -33,9 +43,8 @@ export default function Diagram(props: Props) {
     );
 }
 
-function DiagramInner({ payload }: Props) {
+function DiagramInner({ payload, controlsTarget, queryKeys, onlyQueryTables, queryStage, stageFocus, queryPlaying }: Props) {
     const flowRef = useRef<HTMLDivElement>(null);
-    const exportDetailsRef = useRef<HTMLDetailsElement>(null);
     const { fitView, getNodes, getViewport, setViewport } = useReactFlow();
     const [snap, setSnap] = useState(true);
     const [showHelp, setShowHelp] = useState(false);
@@ -45,10 +54,13 @@ function DiagramInner({ payload }: Props) {
     const isMac = navigator.platform.toUpperCase().includes('MAC');
 
     const filteredPayload = useMemo<DiagramPayload>(() => {
+        if (queryKeys !== undefined) {
+            return onlyQueryTables ? { ...payload, tables: payload.tables.filter(t => queryKeys.has(tableKey(t))) } : payload;
+        }
         if (selectedKeys.size === 0) return payload;
         const tables = payload.tables.filter((t) => selectedKeys.has(tableKey(t)));
         return { tables, rootKey: payload.rootKey };
-    }, [payload, selectedKeys]);
+    }, [payload, selectedKeys, queryKeys, onlyQueryTables]);
 
     const { initialNodes, initialEdges } = useMemo(
         () => buildGraph(filteredPayload),
@@ -56,6 +68,32 @@ function DiagramInner({ payload }: Props) {
     );
     const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>(initialNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+
+    // Keep walkthrough emphasis separate from layout state, so stepping never
+    // moves tables or resets the user's viewport.
+    const visibleNodes = useMemo<TableNodeType[]>(() => nodes.map(node => {
+        const active = Boolean(queryStage && stageFocus?.keys.has(node.id));
+        const inQuery = queryKeys?.has(node.id);
+        return {
+            ...node,
+            className: queryKeys === undefined ? undefined : [
+                inQuery ? 'query-table' : 'query-table-muted',
+                active ? 'query-stage-active' : queryStage && inQuery ? 'query-stage-inactive' : '',
+            ].join(' '),
+            data: {
+                ...node.data,
+                queryFocus: active ? { label: queryStage!.label, columns: stageFocus!.columns.get(node.id) ?? new Set<string>() } : undefined,
+            },
+        };
+    }), [nodes, queryKeys, queryStage, stageFocus]);
+    const visibleEdges = useMemo(() => edges.map(edge => {
+        const sourceColumn = edge.sourceHandle?.replace(/-s[lr]$/, '');
+        const targetColumn = edge.targetHandle?.replace(/-t[lr]$/, '');
+        const active = queryStage?.kind === 'join' && sourceColumn && targetColumn
+            && stageFocus?.columns.get(edge.source)?.has(sourceColumn)
+            && stageFocus.columns.get(edge.target)?.has(targetColumn);
+        return { ...edge, className: active ? 'query-relationship-active' : queryStage ? 'query-relationship-muted' : undefined };
+    }), [edges, queryStage, stageFocus]);
 
     const crossings = useMemo(
         () => computeCrossings(nodes, edges),
@@ -106,7 +144,7 @@ function DiagramInner({ payload }: Props) {
         });
     }, [onNodesChange, nodes, setEdges]);
 
-    const onNodeDragStop = useCallback((_: React.MouseEvent, _node: TableNodeType, draggedNodes: TableNodeType[]) => {
+    const onNodeDragStop = useCallback<OnNodeDrag<TableNodeType>>((_, _node, draggedNodes) => {
         const dragMap = new Map(draggedNodes.map(n => [n.id, n]));
         const merged = nodes.map(n => dragMap.has(n.id) ? { ...n, position: dragMap.get(n.id)!.position } : n);
         const resolved = resolveCollisions(merged);
@@ -194,19 +232,24 @@ function DiagramInner({ payload }: Props) {
 
     return (
         <CrossingsCtx.Provider value={crossings}>
-            <div className="diagram-wrap">
-                <div className="diagram-toolbar">
-                    <details className="filter-dropdown">
-                        <summary>
-                            Filter:{' '}
-                            <strong>
-                                {selectedKeys.size === 0 ? 'All tables' : `${selectedKeys.size} selected`}
-                            </strong>
-                        </summary>
+            <div className={`diagram-wrap ${queryPlaying ? 'query-animating' : ''}`} data-query-stage={queryStage?.kind}>
+                {controlsTarget && createPortal(<div className="diagram-sidebar-controls">
+                    <section className="sidebar-section" aria-labelledby="diagram-tables-heading">
+                        <div className="sidebar-section-heading">
+                            <h3 id="diagram-tables-heading">Tables</h3>
+                            <span className="sidebar-table-count">
+                                {filteredPayload.tables.length} of {allTables.length}
+                            </span>
+                        </div>
+                    {queryKeys === undefined ? <>
+                        <span className="sidebar-filter-summary">
+                            {selectedKeys.size === 0 ? 'All tables' : `${selectedKeys.size} selected`}
+                        </span>
                         <div className="filter-panel">
                             <input
                                 type="search"
-                                placeholder="Search…"
+                                aria-label="Filter tables"
+                                placeholder="Search tables…"
                                 value={filterSearch}
                                 onChange={(e) => setFilterSearch(e.target.value)}
                             />
@@ -237,8 +280,10 @@ function DiagramInner({ payload }: Props) {
                                                     checked={selectedKeys.has(k)}
                                                     onChange={() => toggleKey(k)}
                                                 />
-                                                {t.schema && <span className="schema">{t.schema}.</span>}
-                                                <span className="name">{t.name}</span>
+                                                <span className="filter-table-name" title={k}>
+                                                    {t.schema && <span className="schema">{t.schema}.</span>}
+                                                    {t.name}
+                                                </span>
                                             </label>
                                         </li>
                                     );
@@ -246,23 +291,20 @@ function DiagramInner({ payload }: Props) {
                                 {filterMatches.length === 0 && <li className="empty">No tables match.</li>}
                             </ul>
                         </div>
-                    </details>
-                    <span className="title">
-                        {filteredPayload.tables.length} of {allTables.length} table
-                        {allTables.length === 1 ? '' : 's'}
-                    </span>
-                    <details className="export-dropdown" ref={exportDetailsRef}>
-                        <summary>Export PNG</summary>
-                        <div className="export-menu">
-                            <button onClick={() => { void exportPng('viewport'); exportDetailsRef.current?.removeAttribute('open'); }}>Viewport</button>
-                            <button onClick={() => { void exportPng('full'); exportDetailsRef.current?.removeAttribute('open'); }}>Full diagram</button>
+                    </> : <span className="query-filter-label">{onlyQueryTables ? 'Query tables' : 'All tables'}</span>}
+                    </section>
+                    <section className="sidebar-section" aria-labelledby="diagram-export-heading">
+                        <h3 id="diagram-export-heading">Export PNG</h3>
+                        <div className="sidebar-export-actions">
+                            <button type="button" onClick={() => void exportPng('viewport')}>Viewport</button>
+                            <button type="button" onClick={() => void exportPng('full')}>Full diagram</button>
                         </div>
-                    </details>
-                </div>
+                    </section>
+                </div>, controlsTarget)}
                 <div ref={flowRef} className="diagram">
                     <ReactFlow
-                        nodes={nodes}
-                        edges={edges}
+                        nodes={visibleNodes}
+                        edges={visibleEdges}
                         onNodesChange={onNodesChangeWithEdgeFlip}
                         onEdgesChange={onEdgesChange}
                         onNodeDragStop={onNodeDragStop}
@@ -276,6 +318,7 @@ function DiagramInner({ payload }: Props) {
                         proOptions={{ hideAttribution: true }}
                     >
                         <Background />
+                        {filteredPayload.tables.length === 0 && <div className="diagram-empty">No source tables to show for this query.</div>}
                         <Controls>
                             <ControlButton
                                 onClick={() => setSnap((s) => !s)}

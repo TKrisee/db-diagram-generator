@@ -6,6 +6,9 @@ import { IPC } from '@shared/ipc';
 import type { ConnectionConfig } from '@shared/schema';
 import { active, connect, disconnect } from './db';
 import * as connections from './connections';
+import { analyzeSelect } from './queryAnalysis';
+
+let queryRunning = false;
 
 log.initialize();
 log.transports.file.level = 'debug';
@@ -116,6 +119,22 @@ app.whenReady().then(() => {
         return active().getDiagram();
     });
 
+    ipcMain.handle(IPC.analyzeQuery, (_e, input: string) => {
+        return analyzeSelect(input, active().dialect).analysis;
+    });
+
+    ipcMain.handle(IPC.executeQuery, async (_e, input: string) => {
+        if (queryRunning) throw new Error('A query is already running. Wait for it to finish.');
+        const adapter = active();
+        const { sql, analysis } = analyzeSelect(input, adapter.dialect);
+        queryRunning = true;
+        try {
+            return { ...await adapter.executeQuery(sql), analysis };
+        } finally {
+            queryRunning = false;
+        }
+    });
+
     ipcMain.handle(IPC.listSaved, async () => connections.list());
 
     ipcMain.handle(IPC.saveConnection, async (_e, name: string, cfg: ConnectionConfig) => {
@@ -142,3 +161,6 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
+
+// Cancel dedicated query connections and the Demo process when the app exits.
+app.on('before-quit', () => { void disconnect(); });

@@ -9,6 +9,7 @@
   },
   "license": "MIT",
   "scripts": {
+    "test": "tsx --tsconfig tsconfig.node.json --test tests/*.test.ts",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
@@ -22,6 +23,12 @@
     "package:all": "npm run build && electron-builder -mwl --config --publish never"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.5",
+    "@codemirror/view": "^6.43.12",
     "@types/ssh2": "^1.15.6",
     "@xyflow/react": "^12.11",
     "dagre": "^0.8.5",
@@ -30,6 +37,7 @@
     "html-to-image": "1.11.13",
     "mssql": "^12.7",
     "mysql2": "^3.24",
+    "node-sql-parser": "^5.4.0",
     "pg": "^8.23",
     "react": "^19.2",
     "react-dom": "^19.3",
@@ -48,6 +56,7 @@
     "electron": "^42.11",
     "electron-builder": "^26.15",
     "electron-vite": "^5.0",
+    "tsx": "^4.23.13",
     "typescript": "^6.0",
     "vite": "^7.3"
   },

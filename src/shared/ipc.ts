@@ -1,9 +1,12 @@
 import type { ConnectionConfig, DiagramPayload } from './schema';
+import type { QueryAnalysis, QueryResult } from './query';
 
 export const IPC = {
     connect: 'db:connect',
     disconnect: 'db:disconnect',
     getDiagram: 'db:getDiagram',
+    analyzeQuery: 'db:analyzeQuery',
+    executeQuery: 'db:executeQuery',
     listSaved: 'conn:list',
     saveConnection: 'conn:save',
     deleteConnection: 'conn:delete',
@@ -30,6 +33,8 @@ export type IpcContract = {
     connect: (cfg: ConnectionConfig) => Promise<ConnectResult>;
     disconnect: () => Promise<void>;
     getDiagram: () => Promise<DiagramPayload>;
+    analyzeQuery: (sql: string) => Promise<QueryAnalysis>;
+    executeQuery: (sql: string) => Promise<QueryResult>;
     listSaved: () => Promise<SavedConnectionMeta[]>;
     saveConnection: (name: string, cfg: ConnectionConfig) => Promise<SaveResult>;
     deleteConnection: (id: string) => Promise<void>;

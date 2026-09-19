@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import type { ConnectionConfig, Dialect } from '@shared/schema';
 import type { SavedConnectionMeta } from '@shared/ipc';
 
-type Props = { onConnected: () => void; busy: boolean };
+type Props = { onConnected: (dialect: Dialect) => void; busy: boolean };
 
 const DIALECT_DEFAULT_PORT: Record<'postgres' | 'mysql' | 'mssql', string> = {
     postgres: '5432',
@@ -98,7 +98,7 @@ export default function ConnectionForm({ onConnected, busy }: Props) {
                     setError(`Connected, but save failed: ${saveRes.error}`);
                 }
             }
-            onConnected();
+            onConnected(cfg.dialect);
         } finally {
             setPending(false);
         }
@@ -147,7 +147,7 @@ export default function ConnectionForm({ onConnected, busy }: Props) {
                 setError(res.error);
                 return;
             }
-            onConnected();
+            onConnected(cfg.dialect);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {

@@ -27,10 +27,13 @@ body {
 
 .app { display: flex; flex-direction: column; height: 100%; }
 .app-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
+  display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+  padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
 }
 .app-header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.app-header-brand, .app-header-actions { flex: 0 0 auto; }
+.app-header-brand { display: flex; align-items: center; gap: 12px; }
+.app-header-actions { margin-left: auto; }
 
 button {
   background: var(--accent); color: var(--accent-fg);
@@ -38,6 +41,8 @@ button {
   font: inherit; font-weight: 500; cursor: pointer;
 }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+.sidebar-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; background: var(--bg); color: var(--muted); border: 1px solid var(--border); font-size: 12px; }
+.sidebar-toggle[aria-expanded="true"] { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
 
 button.btn-link {
   background: transparent; color: var(--accent); padding: 4px 8px; font-weight: 400;
@@ -107,33 +112,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .table-list .empty { color: var(--muted); padding: 8px; }
 
 .diagram-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.diagram-toolbar {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
-}
-.diagram-toolbar .title { flex: 1; font-weight: 600; color: var(--muted); font-size: 13px; }
-
-.filter-dropdown { position: relative; }
-.filter-dropdown summary {
-  list-style: none; cursor: pointer;
-  padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--panel); color: var(--text); font-size: 13px;
-  user-select: none;
-}
-.filter-dropdown summary::-webkit-details-marker { display: none; }
-.filter-dropdown summary::after {
-  content: '▾'; margin-left: 8px; color: var(--muted);
-}
-.filter-dropdown[open] summary { border-color: var(--accent); }
 .filter-panel {
-  position: absolute; top: 100%; left: 0; margin-top: 4px;
-  min-width: 280px; max-width: 360px; max-height: 400px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-  padding: 8px; z-index: 10;
   display: flex; flex-direction: column; gap: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
-.filter-panel input[type="search"] { width: 100%; }
+.filter-panel input[type="search"] { width: 100%; font-size: 12px; padding: 7px 9px; }
 .filter-actions { display: flex; gap: 4px; }
 .filter-list {
   list-style: none; padding: 0; margin: 0;
@@ -145,6 +127,8 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   font-size: 13px; color: var(--text); flex-direction: row;
 }
 .filter-list li label:hover { background: var(--bg); }
+.filter-list input[type="checkbox"] { flex-shrink: 0; }
+.filter-table-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filter-list .schema { color: var(--muted); }
 .filter-list .empty { padding: 8px; color: var(--muted); font-size: 13px; }
 
@@ -183,30 +167,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 }
 .react-flow__controls-button.snap-on:hover,
 .react-flow__controls-button.crowsfoot-on:hover { background: var(--accent); }
-.export-dropdown { position: relative; }
-.export-dropdown summary {
-  list-style: none; cursor: pointer;
-  padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--panel); color: var(--text); font-size: 13px;
-  user-select: none;
-}
-.export-dropdown summary::-webkit-details-marker { display: none; }
-.export-dropdown summary::after { content: '▾'; margin-left: 8px; color: var(--muted); }
-.export-dropdown[open] summary { border-color: var(--accent); }
-.export-menu {
-  position: absolute; top: 100%; right: 0; margin-top: 4px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-  padding: 4px; z-index: 10; min-width: 140px;
-  display: flex; flex-direction: column;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-}
-.export-menu button {
-  text-align: left; background: transparent; border: none;
-  padding: 6px 10px; border-radius: 4px; cursor: pointer;
-  font-size: 13px; color: var(--text); width: 100%;
-}
-.export-menu button:hover { background: var(--bg); }
-
 .diagram { flex: 1; min-height: 0; background: var(--bg); }
 
 .table-node {

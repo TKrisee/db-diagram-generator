@@ -1,4 +1,5 @@
 import mysql, { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection as StreamingConnection, FieldPacket } from 'mysql2';
 import type {
     ConnectionConfig,
     DiagramPayload,
@@ -7,7 +8,9 @@ import type {
     ForeignKey,
     IndexMeta
 } from '@shared/schema';
+import { QUERY_ROW_LIMIT, QUERY_TIMEOUT_MS, type QueryData } from '@shared/query';
 import type { DbAdapter } from './types';
+import { toQueryRow } from './queryValues';
 
 type TableRef = {
     schema: string;
@@ -15,14 +18,20 @@ type TableRef = {
 };
 
 export class MysqlAdapter implements DbAdapter {
+    readonly dialect = 'mysql' as const;
     private connection: Connection | null = null;
+    private queryOptions: Parameters<typeof mysql.createConnection>[0] | null = null;
+    private activeQueryConnection: Connection | null = null;
+    private generation = 0;
+    private cancelQuery: (() => void) | null = null;
 
     async connect(cfg: ConnectionConfig) {
         if (cfg.dialect !== 'mysql') {
             throw new Error('Wrong dialect for MysqlAdapter');
         }
 
-        this.connection = await mysql.createConnection({
+        this.generation++;
+        this.queryOptions = {
             host: cfg.host,
             port: cfg.port,
             user: cfg.user,
@@ -30,12 +39,18 @@ export class MysqlAdapter implements DbAdapter {
             database: cfg.database,
             ssl: cfg.ssl ? {} : undefined,
             rowsAsArray: false
-        });
+        };
+        this.connection = await mysql.createConnection(this.queryOptions);
     }
 
     async disconnect() {
+        this.generation++;
+        this.cancelQuery?.();
+        this.activeQueryConnection?.destroy();
+        this.activeQueryConnection = null;
         await this.connection?.end();
         this.connection = null;
+        this.queryOptions = null;
     }
 
     private c() {
@@ -263,6 +278,61 @@ export class MysqlAdapter implements DbAdapter {
         const tables = await this.loadAllTables(refs);
         return { tables };
     }
+
+    /** Stream on a dedicated read-only connection, with a deadline covering connection setup too. */
+    async executeQuery(sql: string): Promise<QueryData> {
+        if (!this.queryOptions) throw new Error('Not connected');
+        const options = this.queryOptions;
+        const startedAt = Date.now();
+        const generation = this.generation;
+        return new Promise<QueryData>((resolve, reject) => {
+            let connection: Connection | null = null;
+            const rows: unknown[][] = [];
+            let columns: string[] = [];
+            let settled = false;
+            const finish = (error?: Error, truncated = false) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                // Closing the dedicated connection rolls back its read-only transaction.
+                connection?.destroy();
+                if (this.activeQueryConnection === connection) this.activeQueryConnection = null;
+                if (this.cancelQuery === cancel) this.cancelQuery = null;
+                if (error) reject(error);
+                else resolve({ columns, rows: rows.map(toQueryRow), truncated,
+                    durationMs: Date.now() - startedAt, rowLimit: QUERY_ROW_LIMIT });
+            };
+            const cancel = () => finish(new Error('Connection was closed while running the query'));
+            this.cancelQuery = cancel;
+            const timeout = setTimeout(() => finish(new Error(`Query timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`)), QUERY_TIMEOUT_MS);
+            mysql.createConnection({ ...options, rowsAsArray: true, connectTimeout: QUERY_TIMEOUT_MS })
+                .then(async connected => {
+                    if (settled || generation !== this.generation) {
+                        connected.destroy();
+                        cancel();
+                        return;
+                    }
+                    connection = connected;
+                    this.activeQueryConnection = connected;
+                    await connected.query('SET TRANSACTION READ ONLY');
+                    if (settled) return;
+                    await connected.beginTransaction();
+                    if (settled) return;
+                    // The promise wrapper exposes its underlying connection for streaming.
+                    const streamConnection = (connected as Connection & { connection: StreamingConnection }).connection;
+                    const query = streamConnection.query({ sql, rowsAsArray: true });
+                    query.on('fields', (fields: FieldPacket[]) => { columns = fields.map(field => field.name); });
+                    query.on('result', (row: unknown[]) => {
+                        if (settled) return;
+                        if (rows.length === QUERY_ROW_LIMIT) { finish(undefined, true); return; }
+                        rows.push(row);
+                    });
+                    query.on('error', finish);
+                    query.on('end', () => finish());
+                }).catch(finish);
+        });
+    }
+
 }
 
 function formatMysqlType(r: {

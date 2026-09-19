@@ -1,19 +1,27 @@
 import type { ConnectionConfig, DiagramPayload, TableSchema, ColumnMeta, ForeignKey, IndexMeta } from '@shared/schema';
+import { QUERY_ROW_LIMIT, QUERY_TIMEOUT_MS, type QueryData } from '@shared/query';
 import type { DbAdapter } from './types';
+import { toQueryRow } from './queryValues';
 
 type TableRef = { schema: string; name: string };
 
 const MS_ODBC_DOCS = 'https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server';
 
 export class MssqlAdapter implements DbAdapter {
+    readonly dialect = 'mssql' as const;
     private pool: any = null;
+    private activeQueryRequest: any = null;
+    private generation = 0;
 
     async connect(cfg: ConnectionConfig) {
         if (cfg.dialect !== 'mssql') throw new Error('Wrong dialect for MssqlAdapter');
+        this.generation++;
 
         let mssql: any;
         try {
-            const mod = await import('mssql');
+            // Keep this optional driver out of TypeScript's static module resolution.
+            const packageName = 'mssql';
+            const mod = await import(packageName);
             mssql = mod.default ?? mod;
         } catch {
             throw new Error(
@@ -46,6 +54,9 @@ export class MssqlAdapter implements DbAdapter {
     }
 
     async disconnect() {
+        this.generation++;
+        this.activeQueryRequest?.cancel();
+        this.activeQueryRequest = null;
         await this.pool?.close();
         this.pool = null;
     }
@@ -240,6 +251,65 @@ export class MssqlAdapter implements DbAdapter {
         const refs = await this.listTables();
         const tables = await this.loadAllTables(refs);
         return { tables };
+    }
+
+    /** mssql streams rows and cancels the request as soon as the cap or deadline is reached. */
+    async executeQuery(sql: string): Promise<QueryData> {
+        if (!this.pool) throw new Error('Not connected');
+        const startedAt = Date.now();
+        const generation = this.generation;
+        const request = this.pool.request();
+        this.activeQueryRequest = request;
+        request.stream = true;
+        request.arrayRowMode = true;
+
+        try {
+            return await new Promise<QueryData>((resolve, reject) => {
+                const rows: unknown[][] = [];
+                let columns: string[] = [];
+                let done = false;
+                let truncating = false;
+                const complete = (error?: Error) => {
+                    if (done) return;
+                    done = true;
+                    clearTimeout(timeout);
+                    if (error && !truncating) reject(error);
+                    else resolve({
+                        columns,
+                        rows: rows.map(toQueryRow),
+                        durationMs: Date.now() - startedAt,
+                        truncated: truncating,
+                        rowLimit: QUERY_ROW_LIMIT,
+                    });
+                };
+                const timeout = setTimeout(() => {
+                    truncating = false;
+                    request.cancel();
+                    complete(new Error(`Query timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`));
+                }, QUERY_TIMEOUT_MS);
+                request.on('recordset', (metadata: Record<string, unknown> | Array<{ name?: string }>) => {
+                    columns = Array.isArray(metadata)
+                        ? metadata.map((column) => column.name ?? '')
+                        : Object.keys(metadata);
+                });
+                request.on('row', (row: unknown[]) => {
+                    if (done || truncating) return;
+                    if (rows.length === QUERY_ROW_LIMIT) {
+                        truncating = true;
+                        request.cancel();
+                        return;
+                    }
+                    rows.push(row);
+                });
+                request.on('error', complete);
+                request.on('done', () => complete());
+                request.query(sql).then(() => {
+                    if (generation !== this.generation) complete(new Error('Connection was closed while running the query'));
+                }).catch(complete);
+            });
+        } finally {
+            if (this.activeQueryRequest === request) this.activeQueryRequest = null;
+        }
     }
 }
 

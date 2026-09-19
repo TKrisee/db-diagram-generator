@@ -1,28 +1,40 @@
-import { Client } from 'pg';
+import { Client, type ClientConfig } from 'pg';
 import type { ConnectionConfig, DiagramPayload, TableSchema, ColumnMeta, ForeignKey, IndexMeta } from '@shared/schema';
+import { QUERY_ROW_LIMIT, QUERY_TIMEOUT_MS, type QueryData } from '@shared/query';
 import type { DbAdapter } from './types';
+import { toQueryRow } from './queryValues';
 
 type TableRef = { schema: string; name: string };
 
 export class PostgresAdapter implements DbAdapter {
+    readonly dialect = 'postgres' as const;
     private client: Client | null = null;
+    private queryConfig: ClientConfig | null = null;
+    private activeQueryClient: Client | null = null;
+    private generation = 0;
 
     async connect(cfg: ConnectionConfig) {
         if (cfg.dialect !== 'postgres') throw new Error('Wrong dialect for PostgresAdapter');
-        this.client = new Client({
+        this.generation++;
+        this.queryConfig = {
             host: cfg.host,
             port: cfg.port,
             user: cfg.user,
             password: cfg.password,
             database: cfg.database,
-            ssl: cfg.ssl ? { rejectUnauthorized: true } : undefined
-        });
+            ssl: cfg.ssl ? { rejectUnauthorized: true } : undefined,
+        };
+        this.client = new Client(this.queryConfig);
         await this.client.connect();
     }
 
     async disconnect() {
+        this.generation++;
+        await this.activeQueryClient?.end().catch(() => {});
+        this.activeQueryClient = null;
         await this.client?.end();
         this.client = null;
+        this.queryConfig = null;
     }
 
     private c() {
@@ -224,6 +236,51 @@ export class PostgresAdapter implements DbAdapter {
         const tables = await this.loadAllTables(refs);
         return { tables };
     }
+
+    /** Uses a dedicated read-only transaction so diagram metadata queries stay responsive. */
+    async executeQuery(sql: string): Promise<QueryData> {
+        if (!this.queryConfig) throw new Error('Not connected');
+
+        const startedAt = Date.now();
+        const generation = this.generation;
+        const client = new Client({ ...this.queryConfig, connectionTimeoutMillis: QUERY_TIMEOUT_MS, query_timeout: QUERY_TIMEOUT_MS });
+        this.activeQueryClient = client;
+        let inTransaction = false;
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            void client.end().catch(() => {});
+        }, QUERY_TIMEOUT_MS);
+        try {
+            await client.connect();
+            if (generation !== this.generation) throw new Error('Connection was closed while starting the query');
+            await client.query('BEGIN READ ONLY');
+            inTransaction = true;
+            await client.query(`SET LOCAL statement_timeout = '${QUERY_TIMEOUT_MS}ms'`);
+            await client.query(`DECLARE db_diagram_query_cursor NO SCROLL CURSOR FOR ${stripTrailingSemicolon(sql)}`);
+            const result = await client.query({ text: `FETCH FORWARD ${QUERY_ROW_LIMIT + 1} FROM db_diagram_query_cursor`, rowMode: 'array' });
+            const rows = (result.rows as unknown[][]).slice(0, QUERY_ROW_LIMIT).map(toQueryRow);
+            return {
+                columns: result.fields.map((field) => field.name),
+                rows,
+                durationMs: Date.now() - startedAt,
+                truncated: result.rows.length > QUERY_ROW_LIMIT,
+                rowLimit: QUERY_ROW_LIMIT,
+            };
+        } catch (error) {
+            if (timedOut) throw new Error(`Query timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`);
+            throw error;
+        } finally {
+            if (inTransaction && !timedOut && generation === this.generation) await client.query('ROLLBACK').catch(() => {});
+            clearTimeout(timeout);
+            await client.end().catch(() => {});
+            if (this.activeQueryClient === client) this.activeQueryClient = null;
+        }
+    }
+}
+
+function stripTrailingSemicolon(sql: string): string {
+    return sql.trim().replace(/;\s*$/, '');
 }
 
 function formatPgType(r: {
