@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0](https://github.com/TKrisee/db-diagram-generator/compare/v1.6.1...v1.7.0) (2026-09-19)
+
+
+### Features
+
+* add advanced native query plan visualization ([9704012](https://github.com/TKrisee/db-diagram-generator/commit/97040125e427736118841bf040397f3a7ae4c057))
+* add SQL editor with animated query walkthrough ([0cd23a3](https://github.com/TKrisee/db-diagram-generator/commit/0cd23a376ceda0ea814372d8810412ec0a5aff2a))
+
 ## [1.6.1](https://github.com/inlinestudio/db-diagram-generator/compare/v1.6.0...v1.6.1) (2026-05-14)
 
 
