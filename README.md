@@ -24,16 +24,19 @@ Built with Electron, React, TypeScript, and [React Flow](https://reactflow.dev/)
 
 ## Status
 
-PostgreSQL, MySQL, and SQL Server support schema diagrams and SELECT queries. SQLite file connections remain a stub.
+PostgreSQL, MySQL / MariaDB, and Microsoft SQL Server have implemented adapters for schema diagrams, SELECT queries, and native estimated execution plans.
 
 | Dialect | Driver | Status |
 |---|---|---|
-| PostgreSQL | `pg` | ✅ Implemented |
-| MySQL / MariaDB | `mysql2` | ✅ Implemented |
-| MS SQL Server | `mssql` | ✅ Implemented |
-| SQLite | `node:sqlite` (planned) | ⏳ Stub |
+| PostgreSQL | `pg` | ✅ Diagrams, SELECT queries, JSON EXPLAIN |
+| MySQL / MariaDB | `mysql2` (shared MySQL adapter) | ✅ Diagrams, SELECT queries, JSON EXPLAIN |
+| Microsoft SQL Server | `mssql` | ✅ Diagrams, SELECT queries, SHOWPLAN_XML |
+| Demo | `node:sqlite` (in-memory) | ✅ Sample diagram, SELECT queries, EXPLAIN QUERY PLAN |
+| SQLite file connections | Not implemented | ⏳ Stub; connection option is visible but cannot connect |
 
-The built-in **Demo** dialect ships a small schema and sample rows (`users`, `orders`, `sessions`) so you can try diagrams and SQL queries without connecting to a database. Demo queries use an isolated in-memory SQLite database.
+PostgreSQL, MySQL / MariaDB, and SQL Server connections support optional SSH tunnels through `ssh2`. MariaDB uses the MySQL adapter and SQL dialect; it does not have a separate adapter.
+
+The built-in **Demo** dialect ships a small schema and sample rows (`users`, `orders`, `sessions`) so you can try diagrams, SQL queries, and native query plans without connecting to a database. Demo queries use an isolated in-memory SQLite database. This does not enable connections to SQLite files.
 
 ## Quick start
 
