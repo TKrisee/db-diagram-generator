@@ -2,6 +2,7 @@ import type { ConnectionConfig, DiagramPayload, TableSchema, ColumnMeta, Foreign
 import { QUERY_ROW_LIMIT, QUERY_TIMEOUT_MS, type QueryData } from '@shared/query';
 import type { DbAdapter } from './types';
 import { toQueryRow } from './queryValues';
+import { PLAN_TEXT_LIMIT, type RawQueryPlan } from '@shared/queryPlan';
 
 type TableRef = { schema: string; name: string };
 
@@ -11,6 +12,10 @@ export class MssqlAdapter implements DbAdapter {
     readonly dialect = 'mssql' as const;
     private pool: any = null;
     private activeQueryRequest: any = null;
+    private activePlanRequest: any = null;
+    private activePlanPool: any = null;
+    private planConfig: any = null;
+    private mssql: any = null;
     private generation = 0;
 
     async connect(cfg: ConnectionConfig) {
@@ -30,7 +35,7 @@ export class MssqlAdapter implements DbAdapter {
         }
 
         try {
-            this.pool = await new mssql.ConnectionPool({
+            this.planConfig = {
                 user: cfg.user,
                 password: cfg.password,
                 server: cfg.host,
@@ -41,7 +46,9 @@ export class MssqlAdapter implements DbAdapter {
                     trustServerCertificate: !cfg.ssl,
                     enableArithAbort: true,
                 },
-            }).connect();
+            };
+            this.mssql = mssql;
+            this.pool = await new mssql.ConnectionPool(this.planConfig).connect();
         } catch (err: any) {
             const msg: string = err?.message ?? '';
             if (/driver|ODBC|provider/i.test(msg)) {
@@ -56,9 +63,15 @@ export class MssqlAdapter implements DbAdapter {
     async disconnect() {
         this.generation++;
         this.activeQueryRequest?.cancel();
+        this.activePlanRequest?.cancel();
+        await this.activePlanPool?.close().catch(() => {});
         this.activeQueryRequest = null;
+        this.activePlanRequest = null;
+        this.activePlanPool = null;
         await this.pool?.close();
         this.pool = null;
+        this.planConfig = null;
+        this.mssql = null;
     }
 
     private req() {
@@ -311,6 +324,75 @@ export class MssqlAdapter implements DbAdapter {
             if (this.activeQueryRequest === request) this.activeQueryRequest = null;
         }
     }
+
+    /** SHOWPLAN is connection-scoped, so it lives in a one-connection disposable pool. */
+    async explainQuery(sql: string): Promise<RawQueryPlan> {
+        if (!this.planConfig || !this.mssql) throw new Error('Not connected');
+        const startedAt = Date.now();
+        const generation = this.generation;
+        const planPool = new this.mssql.ConnectionPool({
+            ...this.planConfig,
+            connectionTimeout: QUERY_TIMEOUT_MS,
+            requestTimeout: QUERY_TIMEOUT_MS,
+            pool: { max: 1, min: 0 },
+        });
+        this.activePlanPool = planPool;
+        let request: any = null;
+        let transaction: any = null;
+        let timedOut = false;
+        const timeout = setTimeout(() => { timedOut = true; request?.cancel(); void planPool.close().catch(() => {}); }, QUERY_TIMEOUT_MS);
+        const assertLive = () => {
+            if (timedOut) throw new Error(`Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`);
+            if (generation !== this.generation) throw new Error('Connection was closed while starting the plan');
+        };
+        try {
+            await planPool.connect();
+            assertLive();
+            transaction = new this.mssql.Transaction(planPool);
+            await transaction.begin();
+            assertLive();
+            request = transaction.request();
+            this.activePlanRequest = request;
+            await request.batch('SET SHOWPLAN_XML ON');
+            assertLive();
+            request = transaction.request();
+            this.activePlanRequest = request;
+            const result = await request.batch(stripMssqlTrailingSemicolon(sql));
+            assertLive();
+            const xml = extractMssqlPlanXml(result);
+            if (!xml) throw new Error('SQL Server did not return a SHOWPLAN_XML result');
+            if (xml.length > PLAN_TEXT_LIMIT) throw new Error(`Query plan exceeds the ${PLAN_TEXT_LIMIT} character limit`);
+            return { format: 'xml', raw: xml, durationMs: Date.now() - startedAt };
+        } catch (error) {
+            if (timedOut) throw new Error(`Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`);
+            throw error;
+        } finally {
+            if (transaction && !timedOut) {
+                request = transaction.request();
+                this.activePlanRequest = request;
+                await request.batch('SET SHOWPLAN_XML OFF').catch(() => {});
+            }
+            // A transaction pins the only connection. Always release it, even after
+            // cancellation; closing a pool while it remains pinned can otherwise hang.
+            if (transaction) await transaction.rollback().catch(() => {});
+            clearTimeout(timeout);
+            if (this.activePlanRequest === request) this.activePlanRequest = null;
+            await planPool.close().catch(() => {});
+            if (this.activePlanPool === planPool) this.activePlanPool = null;
+        }
+    }
+}
+
+function stripMssqlTrailingSemicolon(sql: string): string { return sql.trim().replace(/;\s*$/, ''); }
+
+function extractMssqlPlanXml(result: any): string | null {
+    const recordsets = Array.isArray(result?.recordsets) ? result.recordsets : [result?.recordset ?? []];
+    for (const row of recordsets.flat()) {
+        for (const value of Object.values(row ?? {})) {
+            if (typeof value === 'string' && /<(?:\?xml|ShowPlanXML\b)/i.test(value)) return value;
+        }
+    }
+    return null;
 }
 
 function formatMssqlType(r: {

@@ -435,7 +435,7 @@ function containsExecutableMysqlComment(sql: string): boolean {
     return false;
 }
 
-function foldPostgresUnquotedAscii(sql: string): string {
+export function foldPostgresUnquotedAscii(sql: string): string {
     let output = '';
     for (let index = 0; index < sql.length; index++) {
         const char = sql[index];

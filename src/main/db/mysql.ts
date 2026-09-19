@@ -11,6 +11,7 @@ import type {
 import { QUERY_ROW_LIMIT, QUERY_TIMEOUT_MS, type QueryData } from '@shared/query';
 import type { DbAdapter } from './types';
 import { toQueryRow } from './queryValues';
+import { PLAN_TEXT_LIMIT, type RawQueryPlan } from '@shared/queryPlan';
 
 type TableRef = {
     schema: string;
@@ -333,7 +334,41 @@ export class MysqlAdapter implements DbAdapter {
         });
     }
 
+    async explainQuery(sql: string): Promise<RawQueryPlan> {
+        if (!this.queryOptions) throw new Error('Not connected');
+        const startedAt = Date.now();
+        const generation = this.generation;
+        let connection: Connection | null = null;
+        let timedOut = false;
+        const timeout = setTimeout(() => { timedOut = true; connection?.destroy(); }, QUERY_TIMEOUT_MS);
+        try {
+            connection = await mysql.createConnection({ ...this.queryOptions, connectTimeout: QUERY_TIMEOUT_MS });
+            this.activeQueryConnection = connection;
+            if (timedOut) throw new Error(`Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`);
+            if (generation !== this.generation) throw new Error('Connection was closed while starting the plan');
+            await connection.query('SET TRANSACTION READ ONLY');
+            if (timedOut || generation !== this.generation) throw new Error(timedOut ? `Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds` : 'Connection was closed while starting the plan');
+            await connection.beginTransaction();
+            if (timedOut || generation !== this.generation) throw new Error(timedOut ? `Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds` : 'Connection was closed while starting the plan');
+            const [rows] = await connection.query<RowDataPacket[]>(`EXPLAIN FORMAT=JSON ${stripMysqlTrailingSemicolon(sql)}`);
+            if (timedOut || generation !== this.generation) throw new Error(timedOut ? `Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds` : 'Connection was closed while starting the plan');
+            const raw = String((rows as any[])[0]?.EXPLAIN ?? '');
+            if (!raw) throw new Error('MySQL did not return a JSON query plan');
+            if (raw.length > PLAN_TEXT_LIMIT) throw new Error(`Query plan exceeds the ${PLAN_TEXT_LIMIT} character limit`);
+            return { format: 'json', raw, durationMs: Date.now() - startedAt };
+        } catch (error) {
+            if (timedOut) throw new Error(`Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`);
+            throw error;
+        } finally {
+            clearTimeout(timeout);
+            connection?.destroy();
+            if (this.activeQueryConnection === connection) this.activeQueryConnection = null;
+        }
+    }
+
 }
+
+function stripMysqlTrailingSemicolon(sql: string): string { return sql.trim().replace(/;\s*$/, ''); }
 
 function formatMysqlType(r: {
     column_type: string;

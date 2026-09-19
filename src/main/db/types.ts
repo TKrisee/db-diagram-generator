@@ -1,5 +1,6 @@
 import type { ConnectionConfig, DiagramPayload, Dialect as SchemaDialect } from '@shared/schema';
 import type { QueryData } from '@shared/query';
+import type { RawQueryPlan } from '@shared/queryPlan';
 
 export type Dialect = SchemaDialect;
 
@@ -9,4 +10,5 @@ export interface DbAdapter {
     disconnect(): Promise<void>;
     getDiagram(): Promise<DiagramPayload>;
     executeQuery(sql: string): Promise<QueryData>;
+    explainQuery(sql: string): Promise<RawQueryPlan>;
 }

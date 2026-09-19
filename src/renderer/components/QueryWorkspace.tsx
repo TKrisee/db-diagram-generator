@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DiagramPayload, Dialect } from '@shared/schema';
 import type { QueryAnalysis, QueryResult } from '@shared/query';
+import type { QueryPlanResult } from '@shared/queryPlan';
 import Diagram from './Diagram';
 import SqlEditor from './SqlEditor';
+import QueryPlanGraph from './QueryPlanGraph';
+import QueryPlanDetails from './QueryPlanDetails';
+import { planNodeStage, planWalkOrder } from './planPresentation';
 import { displayValue, initialQuery, resolveQueryStage, resolveQueryTables } from './queryPresentation';
 
 type Props = {
@@ -25,6 +29,12 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
     const [result, setResult] = useState<QueryResult | null>(null);
     const [error, setError] = useState('');
     const [running, setRunning] = useState(false);
+    const [visualization, setVisualization] = useState<'logical' | 'advanced'>('logical');
+    const [planCanvas, setPlanCanvas] = useState<'plan' | 'schema'>('plan');
+    const [plan, setPlan] = useState<QueryPlanResult | null>(null);
+    const [explaining, setExplaining] = useState(false);
+    const [planStep, setPlanStep] = useState(0);
+    const [planPlaying, setPlanPlaying] = useState(false);
     const [onlyQueryTables, setOnlyQueryTables] = useState(true);
     const [step, setStep] = useState(-1);
     const [playing, setPlaying] = useState(false);
@@ -52,13 +62,21 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
         return () => { cancelled = true; window.clearTimeout(timer); };
     }, [sql, editorOpen]);
 
-    const resolved = useMemo(() => resolveQueryTables(analysis?.tables ?? [], payload.tables), [analysis, payload.tables]);
+    const advanced = editorOpen && visualization === 'advanced';
+    const resolved = useMemo(() => resolveQueryTables([
+        ...(analysis?.tables ?? []),
+        ...(advanced && plan ? plan.nodes.flatMap(node => node.relation ? [node.relation] : []) : []),
+    ], payload.tables), [analysis, payload.tables, advanced, plan]);
     const queryKeysSignature = JSON.stringify([...resolved.keys].sort());
     // Keep node positions and the viewport when an edit uses the same source tables.
     const queryKeys = useMemo(() => new Set<string>(JSON.parse(queryKeysSignature)), [queryKeysSignature]);
     const previewIsCurrent = analyzedSql === sql;
     const stages = result?.analysis.stages ?? [];
-    const currentStage = stages[step];
+    const showPlan = advanced && planCanvas === 'plan';
+    const planOrder = useMemo(() => plan ? planWalkOrder(plan) : [], [plan]);
+    const planNode = planOrder[planStep];
+    const planStage = useMemo(() => planNodeStage(planNode, plan), [planNode, plan]);
+    const currentStage = advanced ? planStage : stages[step];
     const stageFocus = useMemo(() => resolveQueryStage(currentStage, payload.tables), [currentStage, payload.tables]);
     const resultFocused = currentStage?.focus === 'result';
 
@@ -69,10 +87,20 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
         return () => window.clearTimeout(timer);
     }, [playing, editorOpen, step, stages.length, speed]);
 
+    useEffect(() => {
+        if (!planPlaying || !advanced) return;
+        if (planStep >= planOrder.length - 1) { setPlanPlaying(false); return; }
+        const timer = window.setTimeout(() => setPlanStep(s => s + 1), 1800 / speed);
+        return () => window.clearTimeout(timer);
+    }, [planPlaying, advanced, planStep, planOrder.length, speed]);
+
     const changeSql = (next: string) => {
         setSql(next);
         if (!next.trim()) { setAnalysis(null); setAnalyzedSql(null); }
         setResult(null);
+        setPlan(null);
+        setPlanPlaying(false);
+        setPlanStep(0);
         setError('');
         setPlaying(false);
         setStep(-1);
@@ -87,6 +115,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
         setError('');
         setResult(null);
         setPlaying(false);
+        setPlanPlaying(false);
         setStep(-1);
         setResultSearch('');
         try {
@@ -96,7 +125,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
             setAnalysis(next.analysis);
             setAnalyzedSql(sql);
             setStep(reducedMotion.current ? next.analysis.stages.length - 1 : 0);
-            setPlaying(!reducedMotion.current);
+            setPlaying(visualization === 'logical' && !reducedMotion.current);
             setReplay(r => r + 1);
         } catch (err) {
             if (execution.current === id) setError(errorMessage(err));
@@ -105,6 +134,33 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
             if (execution.current === id) setRunning(false);
         }
     };
+
+    const explainQuery = async () => {
+        if (inFlight.current || !sql.trim()) return;
+        inFlight.current = true;
+        const id = ++execution.current;
+        setExplaining(true);
+        setError('');
+        setPlaying(false);
+        setPlanPlaying(false);
+        try {
+            const next = await window.db.explainQuery(sql);
+            if (execution.current !== id) return;
+            setPlan(next);
+            setAnalysis(next.analysis);
+            setAnalyzedSql(sql);
+            setPlanStep(0);
+            setPlanCanvas('plan');
+            setPlanPlaying(!reducedMotion.current);
+        } catch (err) {
+            if (execution.current === id) setError(errorMessage(err));
+        } finally {
+            inFlight.current = false;
+            if (execution.current === id) setExplaining(false);
+        }
+    };
+
+    const selectPlanStep = (next: number) => { setPlanStep(next); setPlanPlaying(false); };
 
     const visibleRows = useMemo(() => {
         const search = resultSearch.toLowerCase().trim();
@@ -124,7 +180,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                 </div>
                 <div className="workspace-tabs" role="group" aria-label="Workspace view">
                     <button className={!editorOpen ? 'active' : ''} aria-pressed={!editorOpen}
-                        onClick={() => { setEditorOpen(false); setPlaying(false); }}>Schema</button>
+                        onClick={() => { setEditorOpen(false); setPlaying(false); setPlanPlaying(false); }}>Schema</button>
                     <button className={editorOpen ? 'active' : ''} aria-pressed={editorOpen}
                         onClick={() => setEditorOpen(true)}>SQL editor</button>
                 </div>
@@ -135,16 +191,28 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                         <span className="muted">{analysis ? `${resolved.keys.size} referenced${previewIsCurrent ? '' : ' · last valid query'}` : 'Waiting for a complete SELECT'}</span>
                     </div>
                 )}
-                <div ref={setDiagramControlsTarget} />
+                {showPlan && <p className="query-walkthrough-note">Switch the canvas to Schema to filter tables or export the schema.</p>}
+                <div ref={setDiagramControlsTarget} hidden={showPlan} />
             </aside>
-            <div className={`query-workspace ${editorOpen ? 'editor-open' : ''} ${playing && editorOpen ? 'query-playing' : ''}`}
+            <div className={`query-workspace ${editorOpen ? 'editor-open' : ''} ${(advanced ? planPlaying : playing) && editorOpen ? 'query-playing' : ''}`}
                 data-query-stage={editorOpen ? currentStage?.kind : undefined}>
                 <div className="query-diagram">
-                    {editorOpen && currentStage && <div className="query-stage-summary" role="status" aria-live="polite">
+                    {advanced && <div className="plan-canvas-toolbar">
+                        <div role="group" aria-label="Advanced visualization canvas">
+                            <button className={showPlan ? 'active' : ''} aria-pressed={showPlan} onClick={() => setPlanCanvas('plan')}>Execution plan</button>
+                            <button className={!showPlan ? 'active' : ''} aria-pressed={!showPlan} onClick={() => setPlanCanvas('schema')}>Schema</button>
+                        </div>
+                        <span className="plan-estimate-badge">Estimated</span>
+                    </div>}
+                    {showPlan && (plan && plan.nodes.length > 0 ? <QueryPlanGraph plan={plan} activeId={planNode?.id} playing={planPlaying}
+                        onSelect={id => selectPlanStep(planOrder.findIndex(node => node.id === id))} />
+                        : <div className="query-empty plan-canvas-empty"><span className="plan-empty-icon" aria-hidden="true">⇧</span><strong>{plan ? 'No operators available' : 'Your database’s execution plan'}</strong>
+                            <p>{plan ? 'This plan format could not be visualized. Review the native plan and notes in the details panel.' : 'Choose Explain query to see the operators selected by the database optimizer.'}</p></div>)}
+                    {editorOpen && currentStage && !showPlan && <div className="query-stage-summary" role="status" aria-live="polite">
                         <div className="query-stage-summary-heading">
-                            <span className="query-stage-number">{step + 1}</span>
+                            <span className="query-stage-number">{(advanced ? planStep : step) + 1}</span>
                             <strong>{currentStage.label}</strong>
-                            <span className="query-stage-progress">{step + 1} of {stages.length}</span>
+                            <span className="query-stage-progress">{(advanced ? planStep : step) + 1} of {advanced ? planOrder.length : stages.length}</span>
                         </div>
                         <p>{currentStage.detail}</p>
                         <div className="query-stage-targets">
@@ -154,15 +222,21 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                         </div>
                         {stageFocus.warnings.map(warning => <p className="query-stage-warning" key={warning}>{warning}</p>)}
                     </div>}
+                    <div className="query-schema-canvas" hidden={showPlan}>
                     <Diagram payload={payload}
                         controlsTarget={diagramControlsTarget}
                         queryKeys={editorOpen && analysis ? queryKeys : undefined}
                         onlyQueryTables={editorOpen && onlyQueryTables && Boolean(analysis)}
                         queryStage={editorOpen ? currentStage : undefined}
                         stageFocus={editorOpen ? stageFocus : undefined}
-                        queryPlaying={playing && editorOpen} />
+                        queryPlaying={(advanced ? planPlaying : playing) && editorOpen} />
+                    </div>
                     {editorOpen && <div className="query-diagram-caption">
-                        <span>{currentStage ? 'Highlighted tables and columns belong to this step. ' : 'Referenced tables are highlighted. '}Lines show schema foreign keys.</span>
+                        <span>{showPlan ? plan?.engine === 'demo' || plan?.engine === 'sqlite'
+                            ? 'SQLite lists scan order and other operations. Parent links appear where supplied by the database.'
+                            : 'Select an operator to inspect its details. Arrows connect plan inputs to their parent operators.'
+                            : advanced ? 'Highlighted tables feed the selected plan operator. Lines show schema foreign keys.'
+                                : `${currentStage ? 'Highlighted tables and columns belong to this step. ' : 'Referenced tables are highlighted. '}Lines show schema foreign keys.`}</span>
                     </div>}
                 </div>
                 {editorOpen && (
@@ -171,10 +245,10 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                             <div className="query-section-heading"><label htmlFor="sql-editor">SQL editor</label>
                                 <span className="query-limit">500 rows max · 15s timeout</span></div>
                             <SqlEditor value={sql} onChange={changeSql} onRun={() => void runQuery()}
-                                tables={payload.tables} dialect={dialect} disabled={running} />
+                                tables={payload.tables} dialect={dialect} disabled={running || explaining} />
                             <div className="query-run-row">
                                 <span id="sql-editor-hint" className="muted">{isMac ? '⌘' : 'Ctrl'} + Enter to run</span>
-                                <button onClick={() => void runQuery()} disabled={running || !sql.trim()}>{running ? 'Running…' : 'Run SELECT'}</button>
+                                <button onClick={() => void runQuery()} disabled={running || explaining || !sql.trim()}>{running ? 'Running…' : 'Run SELECT'}</button>
                             </div>
                             <div className="query-analysis-status" role="status">
                                 {!sql.trim() ? 'Write a SELECT query to explore your data.' : previewIsCurrent && analysis
@@ -184,7 +258,24 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                             {warnings.length > 0 && <div className="query-warnings">{warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div>}
                             {error && <div className="query-error" role="alert">{error}</div>}
                         </div>
-                        {result && (
+                        <div className="query-visualization-choice">
+                            <span>Visualization</span>
+                            <div role="group" aria-label="Query visualization">
+                                <button className={!advanced ? 'active' : ''} aria-pressed={!advanced}
+                                    onClick={() => { setVisualization('logical'); setPlanPlaying(false); }}>Logical walkthrough</button>
+                                <button className={advanced ? 'active' : ''} aria-pressed={advanced}
+                                    onClick={() => { setVisualization('advanced'); setPlaying(false); }}>Advanced plan</button>
+                            </div>
+                        </div>
+                        {advanced && <div className="query-plan-section">
+                            <div className="plan-explain-row"><span className="muted">Plan only · SELECT is not executed</span>
+                                <button onClick={() => void explainQuery()} disabled={running || explaining || !sql.trim()}>{explaining ? 'Explaining…' : plan ? 'Refresh plan' : 'Explain query'}</button></div>
+                            <QueryPlanDetails plan={plan} node={planNode} step={planStep} count={planOrder.length}
+                                playing={planPlaying} speed={speed} onSpeed={setSpeed} onStep={selectPlanStep}
+                                canShowSchema={stageFocus.keys.size > 0} onShowSchema={() => { setPlanCanvas('schema'); setPlanPlaying(false); }}
+                                onPlay={() => { if (planStep >= planOrder.length - 1) setPlanStep(0); setPlanPlaying(p => !p); }} />
+                        </div>}
+                        {result && !advanced && (
                             <section className="query-walkthrough" aria-label="Query walkthrough">
                                 <div className="query-section-heading"><strong>Query walkthrough</strong>
                                     <span className="muted">Logical stages</span></div>

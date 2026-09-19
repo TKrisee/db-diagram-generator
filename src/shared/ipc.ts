@@ -1,5 +1,6 @@
 import type { ConnectionConfig, DiagramPayload } from './schema';
 import type { QueryAnalysis, QueryResult } from './query';
+import type { QueryPlanResult } from './queryPlan';
 
 export const IPC = {
     connect: 'db:connect',
@@ -7,6 +8,7 @@ export const IPC = {
     getDiagram: 'db:getDiagram',
     analyzeQuery: 'db:analyzeQuery',
     executeQuery: 'db:executeQuery',
+    explainQuery: 'db:explainQuery',
     listSaved: 'conn:list',
     saveConnection: 'conn:save',
     deleteConnection: 'conn:delete',
@@ -35,6 +37,7 @@ export type IpcContract = {
     getDiagram: () => Promise<DiagramPayload>;
     analyzeQuery: (sql: string) => Promise<QueryAnalysis>;
     executeQuery: (sql: string) => Promise<QueryResult>;
+    explainQuery: (sql: string) => Promise<QueryPlanResult>;
     listSaved: () => Promise<SavedConnectionMeta[]>;
     saveConnection: (name: string, cfg: ConnectionConfig) => Promise<SaveResult>;
     deleteConnection: (id: string) => Promise<void>;

@@ -18,6 +18,7 @@ Built with Electron, React, TypeScript, and [React Flow](https://reactflow.dev/)
 - Export the current diagram to PNG with a single click.
 - SQL editor for SELECT queries, with real result rows and automatic diagram filtering to referenced tables.
 - Animated query walkthrough with pause, step, speed, and replay controls; filter returned rows without rerunning SQL.
+- Advanced visualization of native estimated execution plans, with operator playback, estimates, conditions, indexes, and links back to the schema.
 - Save and recall connections — passwords encrypted via the OS keychain (Keychain on macOS, DPAPI on Windows, libsecret/kwallet on Linux).
 - No telemetry, no SaaS, no account.
 
@@ -78,6 +79,12 @@ The walkthrough highlights source tables and illustrates the query's logical cla
 Each step emphasizes its referenced tables and columns: for example, `WHERE o.total >= 50` highlights only `orders.total`. A step banner lists the targets, while bold outlines, column sweeps, and animated join lines make playback easier to follow. Pausing keeps the highlights visible. Result operations emphasize the result grid; ambiguous or unresolved references are identified without guessing which table to highlight.
 
 Results preserve duplicate column names and NULL values. **Filter returned rows** searches the displayed data locally. At most 500 rows are returned, with a truncation notice when more exist; query execution has a 15-second timeout.
+
+Choose **Advanced plan** below the editor, then **Explain query** to fetch the database's estimated execution plan. Explain is explicit and does not execute the SELECT or run while you type. PostgreSQL uses JSON EXPLAIN, MySQL uses JSON EXPLAIN, SQL Server uses SHOWPLAN_XML on a dedicated session (requires SHOWPLAN permission), and Demo uses SQLite EXPLAIN QUERY PLAN. SQLite file connections remain unimplemented. Actual execution profiling (`EXPLAIN ANALYZE`) is not included.
+
+Select an operator or use **Play plan**, **Next operator**, and the speed control to explore dependencies. The plan shows native operator details, conditions, indexes, row estimates and costs where supplied by the engine; costs are not milliseconds. **Show source tables in schema** links the selected operator's known inputs to the schema diagram. **Logical walkthrough** remains available as a separate visualization. Editing SQL clears the previous plan, while switching views preserves query results.
+
+Plan playback illustrates dependencies rather than exact execution order or elapsed time, and does not display intermediate row values. SQLite and MySQL expose less complete plan structures; the view reports those limits and retains the native plan for inspection. Aliases are linked to physical tables only when unambiguous. Plans are limited to 250 visual operators and 2,000,000 characters, with a 15-second request deadline.
 
 Only one SELECT statement (including read-only CTEs) can run at a time. Writes, SELECT INTO, locking clauses, executable MySQL comments, and parameter placeholders are rejected. Queries must use syntax supported by the SQL parser for the connected dialect. PostgreSQL and MySQL queries use separate read-only transactions; use a database account with read-only permissions as the final permissions boundary, including for database functions. Demo runs in a separate process with SQLite's query-only mode. SQL and results stay in memory for the connection session.
 

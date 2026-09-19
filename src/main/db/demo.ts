@@ -2,6 +2,7 @@ import type { ConnectionConfig, DiagramPayload, TableSchema } from '@shared/sche
 import { QUERY_ROW_LIMIT, QUERY_TIMEOUT_MS, type QueryData } from '@shared/query';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { DbAdapter } from './types';
+import { PLAN_NODE_LIMIT, PLAN_TEXT_LIMIT, type RawQueryPlan } from '@shared/queryPlan';
 
 const users: TableSchema = {
     schema: 'public',
@@ -94,7 +95,7 @@ export class DemoAdapter implements DbAdapter {
                 }, QUERY_TIMEOUT_MS);
                 child.on('message', (result: ({ ready?: boolean; error?: string } & Partial<Omit<QueryData, 'durationMs'>>)) => {
                     if (result.ready) {
-                        child.send({ sql, rowLimit: QUERY_ROW_LIMIT }, (error) => { if (error) finish(error); });
+                        child.send({ mode: 'query', sql, rowLimit: QUERY_ROW_LIMIT }, (error) => { if (error) finish(error); });
                         return;
                     }
                     if (result.error) finish(new Error(result.error));
@@ -104,6 +105,37 @@ export class DemoAdapter implements DbAdapter {
                 child.once('exit', (code, signal) => {
                     if (code !== 0) finish(new Error('Demo query process exited' + (signal ? ' (' + signal + ')' : ' with code ' + code)));
                 });
+            });
+        } finally {
+            if (this.activeChild === child) this.activeChild = null;
+            child.kill('SIGKILL');
+        }
+    }
+
+    async explainQuery(sql: string): Promise<RawQueryPlan> {
+        const startedAt = Date.now();
+        const child = spawn(process.execPath, ['-e', DEMO_QUERY_CHILD], {
+            env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+        });
+        this.activeChild = child;
+        try {
+            return await new Promise<RawQueryPlan>((resolve, reject) => {
+                let settled = false;
+                const finish = (error?: Error, raw?: string) => {
+                    if (settled) return;
+                    settled = true; clearTimeout(timeout);
+                    if (error) reject(error); else resolve({ format: 'json', raw: raw!, durationMs: Date.now() - startedAt });
+                };
+                const timeout = setTimeout(() => { child.kill('SIGKILL'); finish(new Error(`Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`)); }, QUERY_TIMEOUT_MS);
+                child.on('message', (result: { ready?: boolean; error?: string; raw?: string }) => {
+                    if (result.ready) { child.send({ mode: 'explain', sql, planLimit: PLAN_NODE_LIMIT }, error => { if (error) finish(error); }); return; }
+                    if (result.error) finish(new Error(result.error));
+                    else if (!result.raw) finish(new Error('Demo did not return a query plan'));
+                    else if (result.raw.length > PLAN_TEXT_LIMIT) finish(new Error(`Query plan exceeds the ${PLAN_TEXT_LIMIT} character limit`));
+                    else finish(undefined, result.raw);
+                });
+                child.once('error', finish);
+                child.once('exit', (code, signal) => { if (code !== 0) finish(new Error('Demo query process exited' + (signal ? ' (' + signal + ')' : ' with code ' + code))); });
             });
         } finally {
             if (this.activeChild === child) this.activeChild = null;
@@ -121,6 +153,9 @@ db.exec([
     'CREATE TABLE public.users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT, created_at TEXT NOT NULL);',
     'CREATE TABLE public.orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total REAL NOT NULL, status TEXT NOT NULL);',
     'CREATE TABLE public.sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL);',
+    'CREATE INDEX public.idx_users_name ON users(name);',
+    'CREATE INDEX public.idx_orders_status ON orders(status);',
+    'CREATE INDEX public.idx_orders_user_created ON orders(user_id, total);',
     "INSERT INTO public.users VALUES (1, 'ada@example.test', 'Ada Lovelace', '2025-01-10T09:00:00.000Z'), (2, 'linus@example.test', 'Linus Torvalds', '2025-02-14T12:30:00.000Z'), (3, 'grace@example.test', 'Grace Hopper', '2025-03-03T08:15:00.000Z');",
     "INSERT INTO public.orders VALUES (101, 1, 89.50, 'paid'), (102, 1, 25.00, 'pending'), (103, 2, 150.00, 'paid'), (104, 3, 42.75, 'refunded');",
     "INSERT INTO public.sessions VALUES ('ada-active', 1, '2026-01-01T00:00:00.000Z'), ('linus-active', 2, '2026-02-01T00:00:00.000Z'), ('grace-expired', 3, '2024-01-01T00:00:00.000Z');"
@@ -129,6 +164,18 @@ db.exec('PRAGMA query_only = ON;');
 process.send({ ready: true });
 process.once('message', (workerData) => {
   try {
+  if (workerData.mode === 'explain') {
+    const statement = db.prepare('EXPLAIN QUERY PLAN ' + workerData.sql.trim().replace(/;\s*$/, ''));
+    if (typeof statement.setReturnArrays !== 'function') throw new Error('Demo plans require node:sqlite StatementSync.setReturnArrays().');
+    statement.setReturnArrays(true);
+    const rows = [];
+    for (const row of statement.iterate()) {
+      if (rows.length >= workerData.planLimit) throw new Error('Query plan exceeds the ' + workerData.planLimit + ' node limit');
+      rows.push({ id: row[0], parent: row[1], notused: row[2], detail: row[3] });
+    }
+    process.send({ raw: JSON.stringify(rows) });
+    return;
+  }
   const statement = db.prepare(workerData.sql);
   const columns = statement.columns().map((column) => column.name || '');
   if (typeof statement.setReturnArrays !== 'function') throw new Error('Demo queries require node:sqlite StatementSync.setReturnArrays().');

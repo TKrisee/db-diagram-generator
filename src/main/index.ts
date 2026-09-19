@@ -7,6 +7,8 @@ import type { ConnectionConfig } from '@shared/schema';
 import { active, connect, disconnect } from './db';
 import * as connections from './connections';
 import { analyzeSelect } from './queryAnalysis';
+import { normalizeQueryPlan } from './queryPlan';
+import { linkPlanRelations } from './queryPlanReferences';
 
 let queryRunning = false;
 
@@ -130,6 +132,20 @@ app.whenReady().then(() => {
         queryRunning = true;
         try {
             return { ...await adapter.executeQuery(sql), analysis };
+        } finally {
+            queryRunning = false;
+        }
+    });
+
+    ipcMain.handle(IPC.explainQuery, async (_e, input: string) => {
+        if (queryRunning) throw new Error('A query is already running. Wait for it to finish.');
+        const adapter = active();
+        const { sql, analysis } = analyzeSelect(input, adapter.dialect);
+        queryRunning = true;
+        try {
+            const nativePlan = await adapter.explainQuery(sql);
+            const plan = linkPlanRelations(normalizeQueryPlan(nativePlan, adapter.dialect), sql, adapter.dialect);
+            return { ...plan, analysis };
         } finally {
             queryRunning = false;
         }

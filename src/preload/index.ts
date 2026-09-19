@@ -8,6 +8,7 @@ const api = {
     getDiagram: () => ipcRenderer.invoke(IPC.getDiagram),
     analyzeQuery: (sql: string) => ipcRenderer.invoke(IPC.analyzeQuery, sql),
     executeQuery: (sql: string) => ipcRenderer.invoke(IPC.executeQuery, sql),
+    explainQuery: (sql: string) => ipcRenderer.invoke(IPC.explainQuery, sql),
     listSaved: () => ipcRenderer.invoke(IPC.listSaved),
     saveConnection: (name: string, cfg: ConnectionConfig) =>
         ipcRenderer.invoke(IPC.saveConnection, name, cfg),

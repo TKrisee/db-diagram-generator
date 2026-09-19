@@ -13,6 +13,42 @@ async function demoQuery(sql: string) {
     }
 }
 
+async function demoPlan(sql: string) {
+    const adapter = new DemoAdapter();
+    await adapter.connect({ dialect: 'demo' });
+    try { return await adapter.explainQuery(sql); } finally { await adapter.disconnect(); }
+}
+
+test('demo returns SQLite estimated plan rows without query row truncation', async () => {
+    const plan = await demoPlan('SELECT * FROM public.orders WHERE status = \'paid\' ORDER BY total');
+    assert.equal(plan.format, 'json');
+    const rows = JSON.parse(plan.raw) as Array<{ detail: string }>;
+    assert.ok(rows.length > 0);
+    assert.match(rows.map(row => row.detail).join(' '), /SEARCH|SCAN|USE TEMP B-TREE/i);
+});
+
+test('demo explain rejects invalid SQL', async () => {
+    await assert.rejects(() => demoPlan('SELEC nope'), /near "SELEC"|syntax error/i);
+});
+
+test('demo explain accepts a terminal semicolon and does not execute a recursive aggregate', async () => {
+    const plan = await demoPlan(`
+        WITH RECURSIVE numbers(value) AS (
+            VALUES(1) UNION ALL SELECT value + 1 FROM numbers
+        ) SELECT SUM(value) FROM numbers;
+    `);
+    assert.equal(plan.format, 'json');
+    assert.ok(JSON.parse(plan.raw).length > 0);
+});
+
+test('disconnect terminates a pending demo plan', async () => {
+    const adapter = new DemoAdapter();
+    await adapter.connect({ dialect: 'demo' });
+    const pending = adapter.explainQuery('SELECT * FROM public.orders');
+    await adapter.disconnect();
+    await assert.rejects(pending, /process exited|terminated|closed/i);
+});
+
 test('demo executes joins and filters qualified public tables', async () => {
     const result = await demoQuery(`
         SELECT u.name, o.total

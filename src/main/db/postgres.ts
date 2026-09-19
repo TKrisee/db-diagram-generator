@@ -3,6 +3,7 @@ import type { ConnectionConfig, DiagramPayload, TableSchema, ColumnMeta, Foreign
 import { QUERY_ROW_LIMIT, QUERY_TIMEOUT_MS, type QueryData } from '@shared/query';
 import type { DbAdapter } from './types';
 import { toQueryRow } from './queryValues';
+import { PLAN_TEXT_LIMIT, type RawQueryPlan } from '@shared/queryPlan';
 
 type TableRef = { schema: string; name: string };
 
@@ -269,6 +270,38 @@ export class PostgresAdapter implements DbAdapter {
             };
         } catch (error) {
             if (timedOut) throw new Error(`Query timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`);
+            throw error;
+        } finally {
+            if (inTransaction && !timedOut && generation === this.generation) await client.query('ROLLBACK').catch(() => {});
+            clearTimeout(timeout);
+            await client.end().catch(() => {});
+            if (this.activeQueryClient === client) this.activeQueryClient = null;
+        }
+    }
+
+    /** Ask the planner only; EXPLAIN deliberately omits ANALYZE. */
+    async explainQuery(sql: string): Promise<RawQueryPlan> {
+        if (!this.queryConfig) throw new Error('Not connected');
+        const startedAt = Date.now();
+        const generation = this.generation;
+        const client = new Client({ ...this.queryConfig, connectionTimeoutMillis: QUERY_TIMEOUT_MS, query_timeout: QUERY_TIMEOUT_MS });
+        this.activeQueryClient = client;
+        let inTransaction = false;
+        let timedOut = false;
+        const timeout = setTimeout(() => { timedOut = true; void client.end().catch(() => {}); }, QUERY_TIMEOUT_MS);
+        try {
+            await client.connect();
+            if (generation !== this.generation) throw new Error('Connection was closed while starting the plan');
+            await client.query('BEGIN READ ONLY');
+            inTransaction = true;
+            await client.query(`SET LOCAL statement_timeout = '${QUERY_TIMEOUT_MS}ms'`);
+            const result = await client.query(`EXPLAIN (VERBOSE, FORMAT JSON) ${stripTrailingSemicolon(sql)}`);
+            const raw = JSON.stringify(result.rows[0]?.['QUERY PLAN']);
+            if (!raw) throw new Error('PostgreSQL did not return a JSON query plan');
+            if (raw.length > PLAN_TEXT_LIMIT) throw new Error(`Query plan exceeds the ${PLAN_TEXT_LIMIT} character limit`);
+            return { format: 'json', raw, durationMs: Date.now() - startedAt };
+        } catch (error) {
+            if (timedOut) throw new Error(`Plan timed out after ${QUERY_TIMEOUT_MS / 1000} seconds`);
             throw error;
         } finally {
             if (inTransaction && !timedOut && generation === this.generation) await client.query('ROLLBACK').catch(() => {});
