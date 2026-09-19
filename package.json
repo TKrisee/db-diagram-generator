@@ -1,6 +1,6 @@
 {
   "name": "db-diagram-generator",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Native desktop app that connects to a database, picks a table, and renders an ER diagram with FK neighbors.",
   "main": "out/main/index.js",
   "author": {
