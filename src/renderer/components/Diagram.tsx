@@ -28,6 +28,7 @@ const edgeTypes = { crowsfoot: CrowsFootEdge };
 type Props = {
     payload: DiagramPayload;
     controlsTarget?: HTMLDivElement | null;
+    showMinimap?: boolean;
     queryKeys?: Set<string>;
     onlyQueryTables?: boolean;
     queryStage?: QueryStage;
@@ -43,7 +44,7 @@ export default function Diagram(props: Props) {
     );
 }
 
-function DiagramInner({ payload, controlsTarget, queryKeys, onlyQueryTables, queryStage, stageFocus, queryPlaying }: Props) {
+function DiagramInner({ payload, controlsTarget, showMinimap = true, queryKeys, onlyQueryTables, queryStage, stageFocus, queryPlaying }: Props) {
     const flowRef = useRef<HTMLDivElement>(null);
     const { fitView, getNodes, getViewport, setViewport } = useReactFlow();
     const [snap, setSnap] = useState(true);
@@ -351,7 +352,7 @@ function DiagramInner({ payload, controlsTarget, queryKeys, onlyQueryTables, que
                                 </table>
                             </div>
                         )}
-                        <MiniMap pannable zoomable nodeColor="#4a6fa5" nodeStrokeWidth={0} maskColor="rgba(100,120,160,0.35)" style={{ border: '1px solid #000', borderRadius: 8, backgroundColor: '#e8ecf2' }} />
+                        {showMinimap && <MiniMap pannable zoomable nodeColor="#4a6fa5" nodeStrokeWidth={0} maskColor="rgba(100,120,160,0.35)" style={{ border: '1px solid #000', borderRadius: 8, backgroundColor: '#e8ecf2' }} />}
                     </ReactFlow>
                 </div>
             </div>

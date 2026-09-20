@@ -225,6 +225,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                     <div className="query-schema-canvas" hidden={showPlan}>
                     <Diagram payload={payload}
                         controlsTarget={diagramControlsTarget}
+                        showMinimap={!editorOpen}
                         queryKeys={editorOpen && analysis ? queryKeys : undefined}
                         onlyQueryTables={editorOpen && onlyQueryTables && Boolean(analysis)}
                         queryStage={editorOpen ? currentStage : undefined}
