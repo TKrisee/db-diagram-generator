@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/TKrisee/db-diagram-generator/compare/v1.8.0...v1.8.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* preserve table suggestions when column names collide ([f7d1eb2](https://github.com/TKrisee/db-diagram-generator/commit/f7d1eb2d53af3642a34232604f9219cf088c0ae0))
+
 ## [1.8.0](https://github.com/TKrisee/db-diagram-generator/compare/v1.7.1...v1.8.0) (2026-09-20)
 
 
