@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/TKrisee/db-diagram-generator/compare/v1.7.1...v1.8.0) (2026-09-20)
+
+
+### Features
+
+* make SQL editor panel resizable ([af32061](https://github.com/TKrisee/db-diagram-generator/commit/af3206178fb5b562a3f961900caed839e801ee7a))
+
+
+### Bug Fixes
+
+* hide diagram minimap in SQL editor mode ([7f7fd5a](https://github.com/TKrisee/db-diagram-generator/commit/7f7fd5acc7c1d4dd1323adca245260b682a4dfb9))
+
 ## [1.7.1](https://github.com/TKrisee/db-diagram-generator/compare/v1.7.0...v1.7.1) (2026-09-19)
 
 
