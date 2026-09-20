@@ -214,6 +214,7 @@ function incompletePathSource(config: SQLConfig, schemaNames: Set<string>): Comp
 
 function routedSchemaSource(config: SQLConfig, schemaNames: Set<string>): CompletionSource {
     const normal = safeSchemaSource(config);
+    const tableSource = safeSchemaSource({ ...config, tables: undefined });
     const incomplete = incompletePathSource(config, schemaNames);
     return context => {
         const before = context.state.doc.sliceString(0, context.pos);
@@ -223,10 +224,12 @@ function routedSchemaSource(config: SQLConfig, schemaNames: Set<string>): Comple
         // helper is only needed for dangling dots and keyword schema names.
         const result = qualified && !before.endsWith('.') && !attempted ? normal(context) : attempted;
         if (result instanceof Promise || !result) return result;
-        // `tables` carries pre-FROM column candidates. Keep those out of a
-        // table-source position while retaining schemas and table entries.
-        if (/(?:\bfrom|\bjoin)\s+[A-Za-z_\d]*$/i.test(before)) {
-            return { ...result, options: result.options.filter(option => option.type !== 'property') };
+        // `tables` carries global columns, which CodeMirror merges by label
+        // over table entries. Use a separate source here so a same-named
+        // column cannot replace a table and then disappear when filtered.
+        // Check before the completion token to include quoted identifiers.
+        if (/(?:\bfrom|\bjoin)\s+$/i.test(before.slice(0, result.from))) {
+            return tableSource(context);
         }
         return result;
     };

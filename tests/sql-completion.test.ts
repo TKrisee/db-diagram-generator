@@ -78,6 +78,50 @@ test('completes global columns before FROM and columns for joined aliases', () =
     assert.ok(!registered('SELECT * FROM |').some(option => option.type === 'property'));
 });
 
+const packageTables: TableSchema[] = [
+    ...['packages', 'package_downloads', 'package_satis_client', 'package_versions'].map(name => ({ ...tables[0], name })),
+    {
+        ...tables[1], name: 'repository_builds',
+        columns: ['packages', 'public'].map(name => ({ ...tables[1].columns[0], name, dataType: 'jsonb' })),
+    },
+];
+
+for (const dialect of ['postgres', 'mysql', 'sqlite', 'mssql', 'demo'] as const) {
+    test(`${dialect}: table and schema suggestions survive same-named global columns`, () => {
+        for (const sql of [
+            'SELECT * FROM |',
+            'SELECT *\nFROM package|\nLIMIT 100;',
+            'SELECT * FROM repository_builds b JOIN pack|',
+        ]) {
+            const options = registeredFor(packageTables, sql, dialect);
+            assert.ok(options.some(option => option.label === 'packages' && option.type === 'class' && option.detail === 'public'), sql);
+            assert.ok(options.some(option => option.label === 'public' && option.type === 'namespace'), sql);
+            assert.ok(!options.some(option => option.type === 'property'), sql);
+        }
+    });
+}
+
+test('same-named columns do not hide quoted table suggestions', () => {
+    for (const [dialect, opening, closing] of [
+        ['postgres', '"', '"'], ['mysql', '`', '`'], ['mssql', '[', ']'],
+    ] as const) {
+        for (const suffix of ['', closing]) {
+            const options = registeredFor(packageTables, `SELECT * FROM ${opening}package|${suffix}`, dialect);
+            assert.ok(options.some(option => option.label === `${opening}packages${closing}` && option.type === 'class' && option.apply === undefined));
+            assert.ok(!options.some(option => option.type === 'property'));
+        }
+    }
+});
+
+test('column and qualified suggestions remain available when table names collide with columns', () => {
+    const global = registeredFor(packageTables, 'SELECT package|');
+    assert.ok(global.some(option => option.label === 'packages' && option.type === 'property' && option.detail === 'jsonb'));
+    const aliased = registeredFor(packageTables, 'SELECT b.package| FROM repository_builds b');
+    assert.ok(aliased.some(option => option.label === 'packages' && option.type === 'property'));
+    const qualified = registeredFor(packageTables, 'SELECT * FROM public.package|');
+    assert.ok(qualified.some(option => option.label === 'packages' && option.type === 'class'));
+});
+
 test('quotes reserved and unusual identifiers with the configured dialect', () => {
     const postgresOrder = registered('SELECT * FROM ord|', 'postgres').find(option => option.label === 'order');
     assert.equal(postgresOrder?.apply, '"order"');
