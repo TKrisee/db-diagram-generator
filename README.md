@@ -51,6 +51,8 @@ The Electron window opens with a connection form. Pick **Demo**, click **Connect
 
 The sidebar contains the **Schema** and **SQL editor** views, table search and filters, and PNG export. Use **Sidebar** in the top bar to hide or show it; your query, results, and table selection stay in place.
 
+When the diagram and SQL editor are side by side, drag their divider to resize the editor panel. Focus the divider and use **Left/Right** arrows to resize, or **Home/End** for the minimum/maximum width. Double-click the divider or press **Enter** to reset. The chosen width is retained while switching views during the connection session; narrow windows use a stacked layout.
+
 ## Build
 
 ```bash

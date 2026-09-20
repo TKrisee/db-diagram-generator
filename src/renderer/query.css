@@ -32,7 +32,13 @@
 .query-stage-targets span { background: var(--panel); border: 1px solid var(--stage-color); border-radius: 4px; padding: 3px 6px; color: var(--stage-color); font: 11px ui-monospace, monospace; overflow-wrap: anywhere; }
 .query-stage-summary .query-stage-warning { font-size: 11px; color: var(--muted); }
 .query-filter-label { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; padding: 6px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
-.query-panel { flex: 0 0 clamp(390px, 44%, 580px); display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--border); background: var(--panel); overflow: auto; }
+.query-panel { flex: 0 0 var(--query-panel-width, clamp(390px, 44%, 580px)); display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--border); background: var(--panel); overflow: auto; }
+.query-panel-divider { position: relative; flex: 0 0 8px; cursor: col-resize; touch-action: none; background: var(--bg); }
+.query-panel-divider::after { content: ''; position: absolute; top: calc(50% - 22px); left: 2px; width: 4px; height: 44px; border-radius: 2px; background: var(--muted); opacity: .5; }
+.query-panel-divider:hover, .query-panel-divider:focus-visible, .query-panel-resizing .query-panel-divider { background: #dbeafe; }
+.query-panel-divider:hover::after, .query-panel-divider:focus-visible::after, .query-panel-resizing .query-panel-divider::after { background: var(--accent); opacity: 1; }
+.query-panel-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.query-panel-resizing, .query-panel-resizing * { cursor: col-resize !important; user-select: none !important; }
 .sql-editor-section { padding: 14px 16px 8px; flex-shrink: 0; }
 .query-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 10px; }
 .query-section-heading label { color: var(--text); font-weight: 600; }
@@ -130,11 +136,13 @@
 }
 @media (max-width: 880px) {
   .query-workspace.editor-open { flex-direction: column; overflow: auto; }
+  .query-panel-divider { display: none; }
   .editor-open .query-diagram { flex: 0 0 390px; }
   .query-panel { flex: 0 0 720px; border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
 }
 @media (max-width: 1120px) {
   .sidebar-open .query-workspace.editor-open { flex-direction: column; overflow: auto; }
+  .sidebar-open .query-panel-divider { display: none; }
   .sidebar-open .editor-open .query-diagram { flex: 0 0 390px; }
   .sidebar-open .query-panel { flex: 0 0 720px; border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
 }

@@ -6,6 +6,7 @@ import Diagram from './Diagram';
 import SqlEditor from './SqlEditor';
 import QueryPlanGraph from './QueryPlanGraph';
 import QueryPlanDetails from './QueryPlanDetails';
+import { useQueryPanelResize } from './useQueryPanelResize';
 import { planNodeStage, planWalkOrder } from './planPresentation';
 import { displayValue, initialQuery, resolveQueryStage, resolveQueryTables } from './queryPresentation';
 
@@ -23,6 +24,7 @@ function errorMessage(error: unknown) {
 export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props) {
     const [diagramControlsTarget, setDiagramControlsTarget] = useState<HTMLDivElement | null>(null);
     const [editorOpen, setEditorOpen] = useState(false);
+    const panelResize = useQueryPanelResize(editorOpen, sidebarOpen);
     const [sql, setSql] = useState(() => initialQuery(payload.tables, dialect));
     const [analysis, setAnalysis] = useState<QueryAnalysis | null>(null);
     const [analyzedSql, setAnalyzedSql] = useState<string | null>(null);
@@ -194,7 +196,8 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                 {showPlan && <p className="query-walkthrough-note">Switch the canvas to Schema to filter tables or export the schema.</p>}
                 <div ref={setDiagramControlsTarget} hidden={showPlan} />
             </aside>
-            <div className={`query-workspace ${editorOpen ? 'editor-open' : ''} ${(advanced ? planPlaying : playing) && editorOpen ? 'query-playing' : ''}`}
+            <div ref={panelResize.workspaceRef} style={panelResize.style}
+                className={`query-workspace ${editorOpen ? 'editor-open' : ''} ${(advanced ? planPlaying : playing) && editorOpen ? 'query-playing' : ''} ${panelResize.resizing ? 'query-panel-resizing' : ''}`}
                 data-query-stage={editorOpen ? currentStage?.kind : undefined}>
                 <div className="query-diagram">
                     {advanced && <div className="plan-canvas-toolbar">
@@ -240,8 +243,9 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                                 : `${currentStage ? 'Highlighted tables and columns belong to this step. ' : 'Referenced tables are highlighted. '}Lines show schema foreign keys.`}</span>
                     </div>}
                 </div>
+                {editorOpen && <div className="query-panel-divider" {...panelResize.dividerProps} />}
                 {editorOpen && (
-                    <section className="query-panel" aria-label="SQL query workspace">
+                    <section className="query-panel" id="sql-query-panel" aria-label="SQL query workspace">
                         <div className="sql-editor-section">
                             <div className="query-section-heading"><label htmlFor="sql-editor">SQL editor</label>
                                 <span className="query-limit">500 rows max · 15s timeout</span></div>
