@@ -30,7 +30,7 @@
     "@codemirror/state": "^6.7.5",
     "@codemirror/view": "^6.43.12",
     "@types/ssh2": "^1.15.6",
-    "@xmldom/xmldom": "^0.8.15",
+    "@xmldom/xmldom": "^0.9.12",
     "@xyflow/react": "^12.11",
     "dagre": "^0.8.5",
     "electron-log": "^5.4.4",
