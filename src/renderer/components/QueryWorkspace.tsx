@@ -32,6 +32,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
     const [error, setError] = useState('');
     const [running, setRunning] = useState(false);
     const [visualization, setVisualization] = useState<'logical' | 'advanced'>('logical');
+    const [logicalCanvas, setLogicalCanvas] = useState<'tables' | 'results'>('tables');
     const [planCanvas, setPlanCanvas] = useState<'plan' | 'schema'>('plan');
     const [plan, setPlan] = useState<QueryPlanResult | null>(null);
     const [explaining, setExplaining] = useState(false);
@@ -75,6 +76,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
     const previewIsCurrent = analyzedSql === sql;
     const stages = result?.analysis.stages ?? [];
     const showPlan = advanced && planCanvas === 'plan';
+    const showResults = editorOpen && !advanced && logicalCanvas === 'results';
     const planOrder = useMemo(() => plan ? planWalkOrder(plan) : [], [plan]);
     const planNode = planOrder[planStep];
     const planStage = useMemo(() => planNodeStage(planNode, plan), [planNode, plan]);
@@ -84,7 +86,11 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
 
     useEffect(() => {
         if (!playing || !editorOpen) return;
-        if (step >= stages.length - 1) { setPlaying(false); return; }
+        if (step >= stages.length - 1) {
+            setPlaying(false);
+            setLogicalCanvas('results');
+            return;
+        }
         const timer = window.setTimeout(() => setStep(s => s + 1), 1800 / speed);
         return () => window.clearTimeout(timer);
     }, [playing, editorOpen, step, stages.length, speed]);
@@ -107,6 +113,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
         setPlaying(false);
         setStep(-1);
         setResultSearch('');
+        setLogicalCanvas('tables');
     };
 
     const runQuery = async () => {
@@ -127,6 +134,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
             setAnalysis(next.analysis);
             setAnalyzedSql(sql);
             setStep(reducedMotion.current ? next.analysis.stages.length - 1 : 0);
+            setLogicalCanvas(reducedMotion.current ? 'results' : 'tables');
             setPlaying(visualization === 'logical' && !reducedMotion.current);
             setReplay(r => r + 1);
         } catch (err) {
@@ -207,11 +215,19 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                         </div>
                         <span className="plan-estimate-badge">Estimated</span>
                     </div>}
+                    {editorOpen && !advanced && <div className="plan-canvas-toolbar query-canvas-toolbar">
+                        <div role="group" aria-label="Logical walkthrough canvas">
+                            <button className={!showResults ? 'active' : ''} aria-pressed={!showResults}
+                                onClick={() => setLogicalCanvas('tables')}>Visual tables</button>
+                            <button className={showResults ? 'active' : ''} aria-pressed={showResults}
+                                onClick={() => setLogicalCanvas('results')}>Results</button>
+                        </div>
+                    </div>}
                     {showPlan && (plan && plan.nodes.length > 0 ? <QueryPlanGraph plan={plan} activeId={planNode?.id} playing={planPlaying}
                         onSelect={id => selectPlanStep(planOrder.findIndex(node => node.id === id))} />
                         : <div className="query-empty plan-canvas-empty"><span className="plan-empty-icon" aria-hidden="true">⇧</span><strong>{plan ? 'No operators available' : 'Your database’s execution plan'}</strong>
                             <p>{plan ? 'This plan format could not be visualized. Review the native plan and notes in the details panel.' : 'Choose Explain query to see the operators selected by the database optimizer.'}</p></div>)}
-                    {editorOpen && currentStage && !showPlan && <div className="query-stage-summary" role="status" aria-live="polite">
+                    {editorOpen && currentStage && !showPlan && !showResults && <div className="query-stage-summary" role="status" aria-live="polite">
                         <div className="query-stage-summary-heading">
                             <span className="query-stage-number">{(advanced ? planStep : step) + 1}</span>
                             <strong>{currentStage.label}</strong>
@@ -225,7 +241,30 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                         </div>
                         {stageFocus.warnings.map(warning => <p className="query-stage-warning" key={warning}>{warning}</p>)}
                     </div>}
-                    <div className="query-schema-canvas" hidden={showPlan}>
+                    {showResults && <section className={`query-results query-results-canvas ${resultFocused ? 'query-results-active' : ''}`} aria-label="Query results" aria-busy={running}>
+                        <div className="query-section-heading"><strong>Results {resultFocused && <span className="query-result-stage">{currentStage.label}</span>}</strong>
+                            {result && <span className="muted">{result.rows.length} row{result.rows.length === 1 ? '' : 's'} · {Math.round(result.durationMs)} ms</span>}</div>
+                        {!result ? <div className="query-empty"><strong>{running ? 'Running your SELECT…' : 'See what your query returns'}</strong>
+                            <p>{running ? 'The result will appear here when the database responds.' : 'Run a query to view rows and follow the animated walkthrough.'}</p></div> : <>
+                            {result.truncated && <div className="query-truncated" role="status">Showing the first {result.rowLimit} rows. Add a WHERE clause or a smaller limit to narrow the result.</div>}
+                            <input className="result-search" type="search" aria-label="Filter result rows" placeholder="Filter returned rows…"
+                                value={resultSearch} onChange={event => setResultSearch(event.target.value)} />
+                            {resultSearch && <div className="result-filter-count">{visibleRows.length} of {result.rows.length} returned rows</div>}
+                            <div className={`query-result-scroll ${currentStage?.kind === 'result' ? 'result-revealed' : ''}`} key={replay}>
+                                <table className="query-result-table"><thead><tr><th scope="col" className="row-number">#</th>
+                                    {result.columns.map((column, index) => <th scope="col" key={index} title={column}>{column}</th>)}
+                                </tr></thead><tbody>
+                                    {visibleRows.map(({ cells, index }, position) => <tr key={index} style={{ animationDelay: `${Math.min(position, 12) * 35}ms` }}>
+                                        <td className="row-number">{index + 1}</td>
+                                        {cells.map((value, cell) => <td key={cell} className={value === null ? 'null-value' : typeof value === 'number' ? 'numeric-value' : ''}
+                                            title={displayValue(value)}>{displayValue(value)}</td>)}
+                                    </tr>)}
+                                </tbody></table>
+                                {visibleRows.length === 0 && <div className="query-empty">{result.rows.length === 0 ? 'Query completed. No rows returned.' : 'No returned rows match your filter.'}</div>}
+                            </div>
+                        </>}
+                    </section>}
+                    <div className="query-schema-canvas" hidden={showPlan || showResults}>
                     <Diagram payload={payload}
                         controlsTarget={diagramControlsTarget}
                         showMinimap={!editorOpen}
@@ -235,7 +274,7 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                         stageFocus={editorOpen ? stageFocus : undefined}
                         queryPlaying={(advanced ? planPlaying : playing) && editorOpen} />
                     </div>
-                    {editorOpen && <div className="query-diagram-caption">
+                    {editorOpen && !showResults && <div className="query-diagram-caption">
                         <span>{showPlan ? plan?.engine === 'demo' || plan?.engine === 'sqlite'
                             ? 'SQLite lists scan order and other operations. Parent links appear where supplied by the database.'
                             : 'Select an operator to inspect its details. Arrows connect plan inputs to their parent operators.'
@@ -288,19 +327,22 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                                     {stages.map((stage, index) => <button key={index}
                                         className={`query-step ${index === step ? 'current' : index < step ? 'complete' : ''}`}
                                         aria-current={index === step ? 'step' : undefined} title={stage.detail}
-                                        onClick={() => { setStep(index); setPlaying(false); }}>
+                                        onClick={() => { setStep(index); setPlaying(false); if (index === stages.length - 1) setLogicalCanvas('results'); }}>
                                         <span>{index + 1}</span>{stage.label}
                                     </button>)}
                                 </div>
                                 <div className="query-playback">
                                     <button className="btn-secondary" onClick={() => {
-                                        if (step >= stages.length - 1) { setStep(0); setReplay(r => r + 1); }
+                                        if (!playing) {
+                                            setLogicalCanvas('tables');
+                                            if (step >= stages.length - 1) { setStep(0); setReplay(r => r + 1); }
+                                        }
                                         setPlaying(p => !p);
                                     }}>{playing ? 'Pause' : step >= stages.length - 1 ? 'Replay' : 'Play'}</button>
                                     <button className="btn-secondary" disabled={step >= stages.length - 1}
-                                        onClick={() => { setPlaying(false); setStep(s => Math.min(s + 1, stages.length - 1)); }}>Step →</button>
+                                        onClick={() => { const next = Math.min(step + 1, stages.length - 1); setPlaying(false); setStep(next); if (next === stages.length - 1) setLogicalCanvas('results'); }}>Step →</button>
                                     <button className="btn-link" disabled={step >= stages.length - 1}
-                                        onClick={() => { setPlaying(false); setStep(stages.length - 1); }}>Show result</button>
+                                        onClick={() => { setPlaying(false); setStep(stages.length - 1); setLogicalCanvas('results'); }}>Show result</button>
                                     <select aria-label="Animation speed" value={speed} onChange={e => setSpeed(Number(e.target.value))}>
                                         <option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option>
                                     </select>
@@ -308,29 +350,6 @@ export default function QueryWorkspace({ payload, dialect, sidebarOpen }: Props)
                                 <p className="query-walkthrough-note">Illustrates SQL clauses; intermediate rows and database execution order are not measured.</p>
                             </section>
                         )}
-                        <section className={`query-results ${resultFocused ? 'query-results-active' : ''}`} aria-label="Query results" aria-busy={running}>
-                            <div className="query-section-heading"><strong>Results {resultFocused && <span className="query-result-stage">{currentStage.label}</span>}</strong>
-                                {result && <span className="muted">{result.rows.length} row{result.rows.length === 1 ? '' : 's'} · {Math.round(result.durationMs)} ms</span>}</div>
-                            {!result ? <div className="query-empty"><strong>{running ? 'Running your SELECT…' : 'See what your query returns'}</strong>
-                                <p>{running ? 'The result will appear here when the database responds.' : 'Run a query to view rows and follow the animated walkthrough.'}</p></div> : <>
-                                {result.truncated && <div className="query-truncated" role="status">Showing the first {result.rowLimit} rows. Add a WHERE clause or a smaller limit to narrow the result.</div>}
-                                <input className="result-search" type="search" aria-label="Filter result rows" placeholder="Filter returned rows…"
-                                    value={resultSearch} onChange={event => setResultSearch(event.target.value)} />
-                                {resultSearch && <div className="result-filter-count">{visibleRows.length} of {result.rows.length} returned rows</div>}
-                                <div className={`query-result-scroll ${currentStage?.kind === 'result' ? 'result-revealed' : ''}`} key={replay}>
-                                    <table className="query-result-table"><thead><tr><th scope="col" className="row-number">#</th>
-                                        {result.columns.map((column, index) => <th scope="col" key={index} title={column}>{column}</th>)}
-                                    </tr></thead><tbody>
-                                        {visibleRows.map(({ cells, index }, position) => <tr key={index} style={{ animationDelay: `${Math.min(position, 12) * 35}ms` }}>
-                                            <td className="row-number">{index + 1}</td>
-                                            {cells.map((value, cell) => <td key={cell} className={value === null ? 'null-value' : typeof value === 'number' ? 'numeric-value' : ''}
-                                                title={displayValue(value)}>{displayValue(value)}</td>)}
-                                        </tr>)}
-                                    </tbody></table>
-                                    {visibleRows.length === 0 && <div className="query-empty">{result.rows.length === 0 ? 'Query completed. No rows returned.' : 'No returned rows match your filter.'}</div>}
-                                </div>
-                            </>}
-                        </section>
                     </section>
                 )}
             </div>
