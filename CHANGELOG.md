@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/TKrisee/tablehaven/compare/v1.8.1...v1.9.0) (2026-10-06)
+
+
+### Features
+
+* basic cli for agents ([e2f5366](https://github.com/TKrisee/tablehaven/commit/e2f53667c2974559dbb9e0407315eec39b8715dd))
+
 ## [1.8.1](https://github.com/TKrisee/db-diagram-generator/compare/v1.8.0...v1.8.1) (2026-09-20)
 
 
