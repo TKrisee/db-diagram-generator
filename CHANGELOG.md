@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/TKrisee/tablehaven/compare/v1.9.0...v1.9.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* name ([3abedbd](https://github.com/TKrisee/tablehaven/commit/3abedbdcf1380464a5acdbcbd66da4e207112b5a))
+
 ## [1.9.0](https://github.com/TKrisee/tablehaven/compare/v1.8.1...v1.9.0) (2026-10-06)
 
 
