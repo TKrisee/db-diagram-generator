@@ -49,7 +49,7 @@ export default function App() {
                         </svg>
                         Sidebar
                     </button>}
-                    <h1>DB Diagram Generator</h1>
+                    <h1>Tablehaven</h1>
                 </div>
                 {stage !== 'connect' && <div className="app-header-actions">
                     <button onClick={handleDisconnect} className="btn-link">Disconnect</button>

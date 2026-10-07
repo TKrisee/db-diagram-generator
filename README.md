@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="build/icons/512x512.png" width="150px" height="150px" alt="DB Diagram Generator">
+  <img src="build/icons/512x512.png" width="150px" height="150px" alt="Tablehaven">
 </p>
 
-<h1 align="center">DB Diagram Generator</h1>
+<h1 align="center">Tablehaven</h1>
 
 Native desktop tool that connects to a database, picks a table, and renders its columns + foreign-key neighbors as an ER diagram. Read-only, with one-click PNG export. Inspired by [dbdiagram.io](https://dbdiagram.io/) and [chartdb](https://github.com/chartdb/chartdb), but without the visual editor — just point it at a live schema and look.
 

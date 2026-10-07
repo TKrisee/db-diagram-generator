@@ -63,7 +63,7 @@
   },
   "build": {
     "appId": "com.kristoftischler.dbdiagramgenerator",
-    "productName": "DB Diagram Generator",
+    "productName": "Tablehaven",
     "directories": {
       "output": "release"
     },
